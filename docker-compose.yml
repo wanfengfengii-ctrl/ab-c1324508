@@ -1,0 +1,52 @@
+services:
+  api:
+    build: .
+    image: dosimetry-api:latest
+    container_name: dosimetry-api
+    environment:
+      DOSIMETRY_DB: /data/dosimetry.db
+    ports:
+      # Host-side port is configurable: API_PORT=9090 docker compose up -d
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - dosimetry-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).status == 200 else 1)"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+    restart: unless-stopped
+
+  # One-shot: code tests. Activated by the `verify` profile (or scripts/verify.sh).
+  unit-tests:
+    profiles: ["verify"]
+    image: dosimetry-api:latest
+    build: .
+    working_dir: /app
+    entrypoint: ["pytest", "-q"]
+
+  # One-shot: API smoke test over real HTTP. STAGE=smoke1|smoke2 lets the
+  # orchestrating script restart `api` between the two stages; the small
+  # verify-state volume carries the generated course id across the runs.
+  verify:
+    profiles: ["verify"]
+    image: dosimetry-api:latest
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      BASE_URL: http://api:8080
+      STAGE: ${STAGE:-smoke1}
+      VERIFY_STATE: /verify/state.json
+    volumes:
+      - verify-state:/verify
+    entrypoint: ["python", "verify/smoke.py"]
+
+volumes:
+  dosimetry-data:
+  verify-state:
